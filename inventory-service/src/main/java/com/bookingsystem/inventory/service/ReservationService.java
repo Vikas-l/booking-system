@@ -5,6 +5,7 @@ import com.bookingsystem.common.dto.ReservationResponse;
 import com.bookingsystem.inventory.domain.InventoryItem;
 import com.bookingsystem.inventory.domain.Reservation;
 import com.bookingsystem.inventory.exception.LockAcquisitionTimeoutException;
+import com.bookingsystem.inventory.exception.ReservationNotFoundException;
 import com.bookingsystem.inventory.repository.ReservationRepository;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -14,6 +15,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -61,11 +63,27 @@ public class ReservationService {
     public ReservationResponse reserve(ReservationRequest request) {
         return reservationRepository.findByIdempotencyKey(request.idempotencyKey())
                 .map(transactionalOps::toResponse)
-                .orElseGet(() -> reserveWithLock(request));
+                .orElseGet(() -> withInventoryItemLock(request.inventoryItemId(),
+                        () -> doReserveWithIdempotencyFallback(request)));
     }
 
-    private ReservationResponse reserveWithLock(ReservationRequest request) {
-        RLock lock = redissonClient.getLock("inventory-item-lock:" + request.inventoryItemId());
+    /**
+     * Compensating action for the booking saga: called by Booking Service
+     * when a downstream step (payment) fails after a reservation succeeded.
+     * Idempotent -- see {@link ReservationTransactionalOps#doRelease} -- so
+     * a Kafka consumer retrying this call after a redelivered message is
+     * safe.
+     */
+    public ReservationResponse release(Long reservationId) {
+        Long inventoryItemId = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId))
+                .getInventoryItemId();
+
+        return withInventoryItemLock(inventoryItemId, () -> transactionalOps.doRelease(reservationId));
+    }
+
+    private ReservationResponse withInventoryItemLock(Long inventoryItemId, Callable<ReservationResponse> action) {
+        RLock lock = redissonClient.getLock("inventory-item-lock:" + inventoryItemId);
         boolean acquired;
         try {
             acquired = lock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
@@ -75,11 +93,15 @@ public class ReservationService {
         }
 
         if (!acquired) {
-            throw new LockAcquisitionTimeoutException(request.inventoryItemId());
+            throw new LockAcquisitionTimeoutException(inventoryItemId);
         }
 
         try {
-            return doReserveWithIdempotencyFallback(request);
+            return action.call();
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
         } finally {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();

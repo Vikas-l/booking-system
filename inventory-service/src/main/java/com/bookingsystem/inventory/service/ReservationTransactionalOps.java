@@ -6,6 +6,7 @@ import com.bookingsystem.inventory.domain.InventoryItem;
 import com.bookingsystem.inventory.domain.Reservation;
 import com.bookingsystem.inventory.domain.ReservationStatus;
 import com.bookingsystem.inventory.exception.InventoryItemNotFoundException;
+import com.bookingsystem.inventory.exception.ReservationNotFoundException;
 import com.bookingsystem.inventory.repository.InventoryItemRepository;
 import com.bookingsystem.inventory.repository.ReservationRepository;
 import org.slf4j.Logger;
@@ -60,6 +61,34 @@ public class ReservationTransactionalOps {
 
         log.info("Reserved {} unit(s) of item {} (reservationId={}, idempotencyKey={})",
                 request.quantity(), item.getId(), reservation.getId(), request.idempotencyKey());
+
+        return toResponse(reservation);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+    public ReservationResponse doRelease(Long reservationId) {
+        Reservation reservation = reservationRepository.findById(reservationId)
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId));
+
+        if (reservation.getStatus() == ReservationStatus.RELEASED) {
+            // Already released -- treat as a no-op success so a retried
+            // compensating call (e.g. from a re-delivered Kafka message)
+            // doesn't double-release the inventory count.
+            log.info("Reservation {} already released, skipping", reservationId);
+            return toResponse(reservation);
+        }
+
+        InventoryItem item = inventoryItemRepository.findById(reservation.getInventoryItemId())
+                .orElseThrow(() -> new InventoryItemNotFoundException(reservation.getInventoryItemId()));
+
+        item.release(reservation.getQuantity());
+        inventoryItemRepository.save(item);
+
+        reservation.setStatus(ReservationStatus.RELEASED);
+        reservationRepository.save(reservation);
+
+        log.info("Released {} unit(s) of item {} (reservationId={})",
+                reservation.getQuantity(), item.getId(), reservationId);
 
         return toResponse(reservation);
     }

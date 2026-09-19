@@ -6,10 +6,10 @@ COPY inventory-service ./inventory-service
 COPY booking-service ./booking-service
 COPY payment-service ./payment-service
 COPY notification-service ./notification-service
-RUN mvn -pl inventory-service -am -DskipTests package
+RUN mvn -pl booking-service -am -DskipTests package
 
 FROM eclipse-temurin:17-jre-alpine
 WORKDIR /app
-COPY --from=build /workspace/inventory-service/target/inventory-service.jar app.jar
-EXPOSE 8081
+COPY --from=build /workspace/booking-service/target/booking-service.jar app.jar
+EXPOSE 8082
 ENTRYPOINT ["java", "-jar", "app.jar"]

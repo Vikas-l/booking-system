@@ -4,6 +4,7 @@ import com.bookingsystem.common.dto.ErrorResponse;
 import com.bookingsystem.inventory.exception.InsufficientInventoryException;
 import com.bookingsystem.inventory.exception.InventoryItemNotFoundException;
 import com.bookingsystem.inventory.exception.LockAcquisitionTimeoutException;
+import com.bookingsystem.inventory.exception.ReservationNotFoundException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -29,6 +30,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleLockTimeout(LockAcquisitionTimeoutException ex,
                                                              HttpServletRequest req) {
         return build(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), req);
+    }
+
+    @ExceptionHandler(ReservationNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleReservationNotFound(ReservationNotFoundException ex,
+                                                                     HttpServletRequest req) {
+        return build(HttpStatus.NOT_FOUND, ex.getMessage(), req);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

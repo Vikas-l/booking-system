@@ -14,6 +14,9 @@
     <modules>
         <module>common</module>
         <module>inventory-service</module>
+        <module>booking-service</module>
+        <module>payment-service</module>
+        <module>notification-service</module>
     </modules>
 
     <properties>
@@ -53,6 +56,14 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <version>3.13.0</version>
+                    <configuration>
+                        <!-- Spring MVC/Data resolve @PathVariable, @RequestParam,
+                             constructor-binding, etc. by parameter name at
+                             runtime via reflection; without -parameters that
+                             name is erased and resolution fails at request
+                             time instead of at compile time. -->
+                        <parameters>true</parameters>
+                    </configuration>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
